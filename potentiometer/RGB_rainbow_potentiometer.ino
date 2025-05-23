@@ -43,6 +43,13 @@ Red steadily rises wile Blue is maintained constant
 Red and Blue are both at a max
 Blue steadily decreases while red is maintained constant
 Red is at a max
+
+EDIT: int on arduino is just 16 bits 
+and it defaults to signed, so the max value is 32,767
+But some of my intermediate calculations will take values 
+up to around 37,000 (eg. 876-730)*255 /146 as intermediate
+multiplication is 146*255 = 37,230). This can be corrected
+by using an unsigned int
 */
 int red = 9;
 int green = 5;
@@ -56,12 +63,12 @@ void setup() {
 }
 
 void loop() {
-  int detect = analogRead(A0);
-  int redval;
-  int greenval;
-  int blueval;
+  unsigned int detect = analogRead(A0);
+  unsigned int redval;
+  unsigned int greenval;
+  unsigned int blueval;
   if (detect <= 146){ // off -> red (+red)
-    redval = (detect)*255/146; // +red
+    redval = (detect*255)/146; // +red
     greenval = 0;
     blueval = 0;
   }
@@ -82,11 +89,11 @@ void loop() {
   }
   else if (detect > 584 && detect <= 730 ){ // cyan -> blue (-green)
     redval = 0;
-    greenval = (730-detect)*255/146;
+    greenval = (730-detect)*255/146; // -green
     blueval = 255;
   }
   else if (detect > 730 && detect <= 876 ){ // blue -> magenta (+red)
-    redval = (584-detect)*255/146;
+    redval = (detect-730)*255/146; // +red
     greenval = 0;
     blueval = 255;
   }
@@ -96,9 +103,9 @@ void loop() {
     blueval = (1023-detect)*255/146; // (-blue)
   }
   
-  delay(10); // make it less "jumpy"
   analogWrite(red,redval);
   analogWrite(green,greenval);
   analogWrite(blue,blueval);
 
-}
+
+}                                       
