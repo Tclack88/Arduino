@@ -8,12 +8,14 @@ int d5=10;
 int d6=11;
 int d7=12;
 LiquidCrystal lcd(rs, en, d4, d5, d6, d7);
+int CURSOR_POSITION=0;
+int ROW=0;
 
 // TODO: 
 //    [x] dictionary pulses to letters
-//    [] print to LCD
-//    [] overflow LCD 1st line to next
-//    [] automatically clear 1st line if 2nd is filled?
+//    [x] print to LCD
+//    [x] overflow LCD 1st line to next
+//    [x] automatically clear 1st line if 2nd is filled?
 //    [] implement reset button
 //    [] buzzer? (optional)
 //    [] circuit diagram
@@ -23,6 +25,7 @@ LiquidCrystal lcd(rs, en, d4, d5, d6, d7);
 int in = A0;
 int reset = 2;
 String chr = "";
+int buzzer = 5;
 
 struct Map {
   String key;
@@ -73,14 +76,12 @@ String getValue(String key) {
 void parsePulse(int start, int duration,int pulse){
   while (pulse){
     duration = millis() - start;
-    pulse = analogRead(in);
+    pulse = (analogRead(in) > 5);
   }
-  if(duration < 200)
-    // Serial.print(".");
-    chr += ".";
-  else
-    // Serial.print("-");
-    chr += "-";
+  if(duration > 20 && duration < 200)
+    chr += "."; // Serial.print(".");
+  else if (duration >=200)
+    chr += "-"; // Serial.print("-");
   Serial.print(duration);
 }
 
@@ -94,8 +95,7 @@ void checkReset(){
 
 void resetLCD(){
   lcd.clear();
-  lcd.setCursor(0,0);
-  //   lcd.print(i);
+  lcd.setCursor(0,ROW);
 }
 
 
@@ -106,23 +106,27 @@ void setup() {
   Serial.begin(9600);
   pinMode(A0,INPUT);
   pinMode(reset,INPUT);
-  Serial.println(" "); // newline for fresh test
+  pinMode(buzzer,OUTPUT);
+  Serial.println(""); // newline for fresh test
 }
 
 void loop() {
   // put your main code here, to run repeatedly:
   
-  int pulse = analogRead(in);
+  int pulse = (analogRead(in) > 5);
   int spaceStart = millis();
   while (!pulse){
-    pulse = analogRead(in);
+    pulse = (analogRead(in)> 5);
+    digitalWrite(buzzer,LOW);
     checkReset();
     delay(5);
   }
+  digitalWrite(buzzer,HIGH);
   int space = millis() - spaceStart;
   if (space > 1300){
     Serial.print(" "); // print a space if a "long enough" delay has occured
     lcd.print(" ");
+    CURSOR_POSITION++;
   }
 
   int start = millis();
@@ -135,11 +139,13 @@ void loop() {
   pulse = 0;
 
   while (!pulse && timeout < 500){
+    digitalWrite(buzzer,LOW);
     delay(10); // mitigate bounce effects
     checkReset();
-    pulse = analogRead(in);
+    pulse = (analogRead(in) > 5);
     timeout = millis() - timeoutStart;
     if (pulse){
+      digitalWrite(buzzer,HIGH);
       parsePulse(millis(),0,pulse);
       timeoutStart = millis();
       timeout = 0;
@@ -148,11 +154,17 @@ void loop() {
   }
  
   Serial.print(getValue(chr)); // space for new char
-  lcd.print(getValue(chr));
-
-
-    // Serial.print(" "); // space for new char
+  if (chr != ""){
+    lcd.print(getValue(chr));
+    CURSOR_POSITION++;
+  }
+  if (CURSOR_POSITION >= 16){
+    ROW = (ROW+1)%2;
+    if (ROW==0)
+      lcd.clear();
+    lcd.setCursor(0,ROW);
+    CURSOR_POSITION=0;
+  }
 
   chr = "";
-
 }
