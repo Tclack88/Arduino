@@ -18,7 +18,7 @@ int ROW=0;
 //    [x] automatically clear 1st line if 2nd is filled?
 //    [] implement reset button
 //    [] buzzer? (optional)
-//    [] circuit diagram
+//    [x] circuit diagram
 
 
 
@@ -101,7 +101,6 @@ void resetLCD(){
 
 
 void setup() {
-  // put your setup code here, to run once:
   lcd.begin(16,2);
   Serial.begin(9600);
   pinMode(A0,INPUT);
@@ -111,8 +110,6 @@ void setup() {
 }
 
 void loop() {
-  // put your main code here, to run repeatedly:
-  
   int pulse = (analogRead(in) > 5);
   int spaceStart = millis();
   while (!pulse){
