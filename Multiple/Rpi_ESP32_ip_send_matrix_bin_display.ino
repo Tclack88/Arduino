@@ -1,5 +1,3 @@
-// referenes: https://www.youtube.com/watch?v=yPkkH9TGBWo
-//            https://www.instructables.com/DOT-Matrix-8x8-Using-Arduino/
 #include <Wire.h>
 #include <LedController.hpp> // Noa Sakurajin
 
@@ -11,7 +9,7 @@ const uint8_t NUM_MATRICES = 1;
 sakurajin::LedController<NUM_MATRICES, NUM_MATRICES> lc;
 
 // char buff[4] = {0,0,0,0}; // Buffer for one octet (max 3 digits + null terminator)
-uint8_t octets[4];
+uint8_t ip[4];
 
 
 // void displayMessage(int size){
@@ -38,10 +36,6 @@ void printBuf(char arr[], int size){
   Serial.println();
 }
 
-// uint8_t numberToPattern(uint8_t num) {
-//   return num; // Since a byte is already 8 bits, the number is the pattern
-// }
-
 void displayMatrix(uint8_t ip[4]){
   lc.clearMatrix();
   lc.setRow(0,0,ip[0]);
@@ -56,7 +50,7 @@ void displayMessage(int size) {
   char buff[4] = {0,0,0,0}; // Buffer for one octet (max 3 digits + null terminator)
   int i = 0;
 
-  int octet_idx = 0;
+  int ip_idx = 0;
 
   while (Wire.available()){
     for (int j=0; j<size;j++){
@@ -66,10 +60,12 @@ void displayMessage(int size) {
           printBuf(buff, i);
           int val = (uint8_t) atoi(buff); // char array to int
           Serial.printf("%d\n",val);
-          octets[octet_idx] = val;
-          octet_idx++;
+          ip[ip_idx] = val;
+          ip_idx++;
           i = 0; // Reset buffer for next octet
       }
+      else if (isspace(c) or c=='\0') // was getting leading nullbyte or space that was affecting displayed ip addr.
+        continue;
       else { // Add the digit character to the buffer
         if (i < 3) { // prevent seg fault
           buff[i] = c;
@@ -77,13 +73,13 @@ void displayMessage(int size) {
         }
       }
 
-      if(i>0 && octet_idx<4){ // populate last index (no '.')
+      if(i>0 && ip_idx<4){ // populate last index (no '.')
         buff[i] = '\0';
-        octets[octet_idx] = (uint8_t) atoi(buff);
+        ip[ip_idx] = (uint8_t) atoi(buff);
         
       }
     }
-    printArr(octets,4);
+    printArr(ip,4);
   }
 }
 
@@ -101,12 +97,12 @@ void setup() {
 
   lc.init(config);
   lc.activateAllSegments();
-  lc.setIntensity(5); // 0-15
+  lc.setIntensity(1); // 0-15
   lc.clearMatrix();
 }
 
 void loop() {
   // implement matrix stuff here when other logic handled
-  // uint8_t ip[4] = {192, 168, 1, 74};
-  displayMatrix(octets);
+  // uint8_t ip[4] = {192, 168, 1, 74}; // test
+  displayMatrix(ip);
 }
