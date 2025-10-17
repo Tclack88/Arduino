@@ -1,3 +1,4 @@
+# UDP connection with ESP32 as server interacting with Rpi (client). Used in conjunction with Rpi_ESP32_UDP_transmit_server.ino
 from math import floor
 import RPi.GPIO as GPIO
 import socket
@@ -57,7 +58,10 @@ ESP_port = 12005
 server_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM) #UDP
 
 while True:
-    message = input()
+    #message = input()
+    while GPIO.input(button) == 0:
+        time.sleep(.1)
+    message = "button pressed!"
     #server_socket.bind( (ESP_ip, port) ) # bind() used for specified port. sendto() will work and an "ephemeral" port would be created
     #server_socket.connect( (ESP_ip, ESP_port) )
     
