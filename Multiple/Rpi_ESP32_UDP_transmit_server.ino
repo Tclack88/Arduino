@@ -13,6 +13,7 @@ const char* pw = WIFI_PW;
 int port = 12005;
 #define iLED 2 // internal LED
 
+bool iLED_status = false;
 int sensor = 34;
 int val = 0;
 int sending = 0; // toggle 1 or 0. Keep track if sending to UDP or not
@@ -24,8 +25,6 @@ WiFiUDP UDP;
 int I = 0;
 float data[5] = {0.0,0.0,0.0,0.0,0.0};
 
-// float R1 = 1000; // TODO: measure for more precision
-
 float avg_photoresistor(){
   float sum = 0.0;
   for (int i=0; i<5; i++)
@@ -35,7 +34,6 @@ float avg_photoresistor(){
 
 int check_request(){
   int packetSize = UDP.parsePacket();
-  // Serial.printf("checking for packet... size: %d",packetSize);
   return packetSize; // 0 if no packet (button press), else positive
 }
 
@@ -43,13 +41,18 @@ void collect(){
   val = analogRead(sensor);
   voltage = ( (float)val /4095 )*3.3;
   data[I] = voltage;
-  I = (I+1)%4;
+  I = (I+1)%5;
 }
 
 void send(){
   UDP.beginPacket(UDP.remoteIP(),UDP.remotePort());
   UDP.print(avg_photoresistor());
   UDP.endPacket();
+}
+
+void toggle_iLED(){
+  iLED_status = !iLED_status;
+  digitalWrite(iLED,iLED_status);
 }
 
 void setup() {
@@ -77,11 +80,12 @@ void loop() {
     Serial.print("UDP request received from ");
     Serial.print(UDP.remoteIP());
     Serial.printf(". Packetsize: %d, Message: %s.\n",packetSize, packet_received);
-    // sending = (sending + 1)%2;
     sending = 1;
     for (int i=0; i<5; i++){ // collect initial 5 packets
       collect();
-      delay(1000);
+      delay(500);
+      toggle_iLED();
+      delay(500);
     }
     send(); // send first sample of 5
     unsigned long now = millis();
@@ -108,21 +112,16 @@ void loop() {
         collect();
         collect_timer = now;
       }
-      // TODO: blink_tiemr
+      if ( (now - blink_timer) >= 500){
+        toggle_iLED();
+        blink_timer = now;
+      }
       delay(50); // short enough to catch button press, but still save energy
 
     }
 
-  // TODO: work on logic for average value,  for now, just return current reading
-  //   data[I] = val;
-  //   I++;
-  //   int begin = millis();
-  //   while (millis() - begin < 1000){
-  //     // add some interrupt to read data upon request from UDP
-  //     check_request();
-  //     continue;
-  //   }
   }
+  digitalWrite(iLED,false); // not receiving/sending, turn off
   delay(300);
 }
 
