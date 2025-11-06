@@ -28,7 +28,6 @@ def check_button_press():
     while True:
         press = GPIO.input(button)
         if press:
-            #print("button pressed, toggling state")
             if STATE.value == 0:
                 STATE.value = 1
             elif STATE.value == 1:
@@ -85,7 +84,6 @@ def send_message():
     server_socket.sendto(message.encode('utf-8'), (ESP_ip, ESP_port) )
 
 while True:
-    #print(STATE)
     while STATE.value == 0 or STATE.value == 2:
         time.sleep(.1) # idle or error, stay here
     send_message() # leaving idle, send message to ESP32 to initiate UDP
