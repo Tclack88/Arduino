@@ -23,7 +23,8 @@ GPIO.setup(green,GPIO.OUT)
 STATE = mp.Value('i',0)
 press = mp.Value('b',GPIO.input(button))
 
-esp_list = []
+manager = mp.Manager()
+esp_list = manager.list() # allow list to be accesible by parent and separate process
 ESP_port = 12005
 
 def check_button_press():
@@ -59,19 +60,24 @@ def blink_white(STATE):
             GPIO.output(white,False)
 
 def update_esps():
+    #global esp_list
     while True:
-        command = "cat output.txt | grep esp32 | grep -E '[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+' -o"
-        res = (subprocess.check_output(command,shell=True)).decode().strip()
-        ESP32s = res.split('\n')
-        esp_list = ESP32s
-        time.sleep(1)
+        try:
+            command = "nmap -sn 192.168.1.0/24 | grep esp32 | grep -E '[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+' -o"
+            res = (subprocess.check_output(command,shell=True)).decode().strip()
+            ESP32s = res.split('\n')
+            esp_list[:] = ESP32s
+            time.sleep(1)
+            #print(ESP32s)
+        except Exception as e:
+            print(f"failure in updating ESP list - {e}")
 
 button_process = mp.Process(target=check_button_press)
 blink_process = mp.Process(target=blink_white, args=(STATE,))
 update_esp_process = mp.Process(target=update_esps,)
 button_process.start()
 blink_process.start()
-udpate_esp_process.start()
+update_esp_process.start()
 
 
 def light_LED(val):
@@ -97,9 +103,12 @@ def send_message(cmd):
     # send 'C' (continue/commence) or 'E' (end), followed by number of
     # ESP32 IP adresses followed by each ip address
     esps = ' '.join(sorted(esp_list))  # append cmd "C"/"E" and ESP list
-    message = cmd + f" {len(esps)}  " + esps
-    print("temp debug:", message)
-    server_socket.sendto(message.encode('utf-8'), (ESP_ip, ESP_port) )
+    message = cmd + f" {len(esp_list)}  " + esps
+    #print("temp debug:", message)
+    #print(f"esps: {esp_list}")
+    for ESP_ip in esp_list:
+        #print(f"sending message: {message} to esp {ESP_ip}")
+        server_socket.sendto(message.encode('utf-8'), (ESP_ip, ESP_port) )
 
 while True:
     #print(STATE)
@@ -110,12 +119,15 @@ while True:
         send_message('C') # 'C': continue/commence. leaving idle, send message to ESP32 to initiate UDP
         try:
             resp_message, addr = server_socket.recvfrom(1024)
-            ID, val = float(resp_message.decode('utf-8')).split() # TODO: ID correspond to R,G,B. Do on ESP32 side also # TODO: ID correspond to R,G,B. Do on ESP32 side also
+            print(f"debug: resp_message = {resp_message.decode('utf-8')}")
+            ID, val = (resp_message.decode('utf-8')).split() # TODO: ID correspond to R,G,B. Do on ESP32 side also # TODO: ID correspond to R,G,B. Do on ESP32 side also
+            ID = int(ID)
+            val = float(val)
             if val < 0: # -1 received back to indicate/confirm END
                 print("END")
                 light_LED(5) #5 is outside range of 0-3, so it will turn off
             else:
-                print(f"sucessful receipt of message from {addr[0]}. message: {resp_message} (type:{type(resp_message)})")
+                #print(f"sucessful receipt of message from {addr[0]}. message: {resp_message} (type:{type(resp_message)})")
                 light_LED(ID) # 1 lights red, 2 - yellow, 3 - greean, else off
 
         except Exception as e:
