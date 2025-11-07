@@ -8,7 +8,7 @@
 #define WIFI_PW "wifi_password"
 */
 
-const char ID = 1;
+const char ID = 3;
 
 const char* ssid = WIFI_SSID;
 const char* pw = WIFI_PW;
@@ -19,9 +19,9 @@ bool IS_MASTER = false;
 
 bool iLED_status = false;
 int sensor = 34;
-int val = 0;
+// int val = 0;
 int sending = 0; // toggle 1 or 0. Keep track if sending to UDP or not
-float voltage = 0.0;
+// float voltage = 0.0;
 IPAddress myIP;
 char myIP_string[16];
 char brother1IP[16];
@@ -43,22 +43,19 @@ float avg_photoresistor(){
   return sum / 5;
 }
 
-int check_request(){
-  int packetSize = PI_UDP.parsePacket();
-  return packetSize; // 0 if no packet (button press), else positive
-}
-
 void collect(){
-  val = analogRead(sensor);
-  voltage = ( (float)val /4095 )*3.3;
+  int val = analogRead(sensor);
+  float voltage = ( (float)val /4095 )*3.3;
   data[I] = voltage;
+  // Serial.printf("DEBUG: val: %d, voltage: %f (%f %f %f %f %f)\n",val, voltage, data[0], data[1], data[2], data[3], data[4]);
   I = (I+1)%5;
 }
 
 void send(){
   PI_UDP.beginPacket(PI_UDP.remoteIP(),PI_UDP.remotePort());
   char message_out[255];
-  sprintf(message_out, "%d %d", ID, avg_photoresistor());
+  sprintf(message_out, "%d %f", ID, avg_photoresistor());
+  Serial.printf("\n\nsending message: %s\n\n",message_out);
   PI_UDP.print(message_out);
   PI_UDP.endPacket();
 }
@@ -68,14 +65,15 @@ void toggle_iLED(){
   digitalWrite(iLED,iLED_status);
 }
 
-void parse_packet(char packet_received[]){
+char parse_packet(char packet_received[]){
   // Changes the "brothers" list (who is available)
-  printf("packet received: %s\n",packet_received);
+  // printf("packet received: %s\n",packet_received);
   char cmd;
   int size;
   int num_chars = 0;
-  char ip_addr[16]; // 255.255.255.255 15 char max + nullbyte                                                                                                                             sscanf(packet_received, "%c %d %n", &cmd, &size, &num_chars); // maybe change to fgets (255 buffer size) for "safety"
-  printf("cmd: %c, size: %d\n", cmd, size);
+  char ip_addr[16]; // 255.255.255.255 15 char max + nullbyte                                                                                                                             
+  sscanf(packet_received, "%c %d %n", &cmd, &size, &num_chars); // maybe change to fgets (255 buffer size) for "safety"
+  // printf("cmd: %c, size: %d\n", cmd, size);
   swarm_size = size; // update locally known count
   if (cmd == 'C'){
     int brother = 0;
@@ -91,6 +89,7 @@ void parse_packet(char packet_received[]){
   else { // 'E' or end
     printf("END\n");
   }
+  return cmd;
 }
 
 bool determine_master(char* brothers[]){
@@ -102,22 +101,39 @@ bool determine_master(char* brothers[]){
   for (int i=0; i<swarm_size-1; i++){
     IPAddress brotherIP;
     brotherIP.fromString(brothers[i]);
+    // Serial.printf("\t checking brother: "); Serial.println(brotherIP);
     ESP_UDP.beginPacket(brotherIP,swarm_port); // TODO: double check ip address format
     ESP_UDP.print(myVal);
     ESP_UDP.endPacket();
-    ESP_UDP.begin(swarm_port); // re-Begin UDP listener
+    // ESP_UDP.begin(swarm_port); // re-Begin UDP listener
     int esp_packetSize = ESP_UDP.parsePacket();
     if (esp_packetSize){
       int len = ESP_UDP.read(local_packet_received,sizeof(local_packet_received)-1);
       local_packet_received[len] = 0; // Null terminate
-      Serial.printf("local packet message: %s\n", local_packet_received);
-      float val = atoi(local_packet_received); 
+      // Serial.printf("local packet message: %s\n", local_packet_received);
+      float val = atof(local_packet_received); 
       largest = max(largest, val);
+      Serial.print("\n\t brother:");Serial.print(brotherIP); Serial.print("  ");Serial.println(val);
+      Serial.print("\t me     :");Serial.print(myIP); Serial.print("  ");Serial.println(myVal);
     }
   }
   if (myVal == largest)
     return true; // IS_MASTER set to true
   return false; // IS_MASTER set to false
+}
+
+char check_request(int packetSize){
+  // update contents of packet_received (last Rpi message)
+  // Calls parse_packet to "update brother's"
+  // int packetSize = PI_UDP.parsePacket();
+  // return packetSize; // 0 if no packet (button press), else positive
+  int len = PI_UDP.read(packet_received,sizeof(packet_received)-1);
+  packet_received[len] = 0; // Null terminate
+  // Serial.print("UDP request received from ");
+  // Serial.print(PI_UDP.remoteIP());
+  // Serial.printf(". Packetsize: %d, Message: %s.\n",packetSize, packet_received);
+  char cmd = parse_packet(packet_received); // establishes brothers, receives cmd ('C' or 'E')
+  return cmd;
 }
 
 void setup() {
@@ -142,12 +158,13 @@ void setup() {
 void loop() {
   int packetSize = PI_UDP.parsePacket();
   if (packetSize){  // add "or" condition check for cancellation
-    int len = PI_UDP.read(packet_received,sizeof(packet_received)-1);
-    packet_received[len] = 0; // Null terminate
-    Serial.print("UDP request received from ");
-    Serial.print(PI_UDP.remoteIP());
-    Serial.printf(". Packetsize: %d, Message: %s.\n",packetSize, packet_received);
-    parse_packet(packet_received); // establishes brothers, receives cmd ('C' or 'E')
+    // int len = PI_UDP.read(packet_received,sizeof(packet_received)-1);
+    // packet_received[len] = 0; // Null terminate
+    // Serial.print("UDP request received from ");
+    // Serial.print(PI_UDP.remoteIP());
+    // Serial.printf(". Packetsize: %d, Message: %s.\n",packetSize, packet_received);
+    // parse_packet(packet_received); // establishes brothers, receives cmd ('C' or 'E')
+    char cmd = check_request(packetSize); 
     IS_MASTER = determine_master(brothers);
     if (IS_MASTER){
       sending = 1;
@@ -157,22 +174,24 @@ void loop() {
       unsigned long collect_timer = now; // timer for every 1 second
       while (sending){
         // Sending stopped if IS_MASTER returns false or a button press is received while sneding as the master
-        IS_MASTER = determine_master(brothers);
-        sending = IS_MASTER;
-        unsigned long now = millis();
-        if (int r = check_request()){ // button pressed again, cancel
-          Serial.printf("\tRequest received: %d",r);
-          sending = 0; 
-          PI_UDP.beginPacket(PI_UDP.remoteIP(),PI_UDP.remotePort());
-          PI_UDP.print("-1");
-          Serial.println("cancelled, no more sending information");
-          PI_UDP.endPacket();
-          PI_UDP.begin(rpi_port); // re-Begin UDP listener
+        packetSize = PI_UDP.parsePacket();
+        if (packetSize){
+          cmd = check_request(packetSize);
+          IS_MASTER = determine_master(brothers);
+          sending = (IS_MASTER && cmd == 'C'); // end if end signal 'E' is received
+          if (cmd == 'E'){ // cancel 
+            PI_UDP.beginPacket(PI_UDP.remoteIP(),PI_UDP.remotePort());
+            PI_UDP.print("-1 -1");
+            // Serial.println("cancelled, no more sending information");
+            PI_UDP.endPacket();
+            // PI_UDP.begin(rpi_port); // re-Begin UDP listener
+          }
         }
+        now = millis();
         if ( (now - send_timer) >= 2000 ){
           send();
           send_timer = now; // reset
-          Serial.printf("(data sent)(val=%d)\n",val);
+          // Serial.printf("(data sent)(val=%d)\n",val);
         }
         if ( (now - collect_timer) >= 1000){
           collect();
