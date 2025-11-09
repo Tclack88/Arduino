@@ -6,6 +6,13 @@ import socket
 import subprocess
 import time
 
+ip_cmd = "hostname -I | awk '{print $1}'"
+myIP = (subprocess.check_output(ip_cmd,shell=True)).decode().strip()
+cidr_block = '.'.join(myIP.split('.')[:3])+'.0/24'
+print(f"my IP: {myIP}")
+print(f"cidr block: {cidr_block}")
+
+
 button = 16
 red = 5
 yellow = 6
@@ -22,10 +29,53 @@ GPIO.setup(green,GPIO.OUT)
 
 STATE = mp.Value('i',0)
 press = mp.Value('b',GPIO.input(button))
+ID = mp.Value('i',0)
+val = mp.Value('d',0)
 
 manager = mp.Manager()
 esp_list = manager.list() # allow list to be accesible by parent and separate process
 ESP_port = 12005
+
+
+"""
+def light_LED(val):
+    # changes the RGB lights. Any value outside
+    # (eg. 5) will just turn all off
+    GPIO.output(red,False)
+    GPIO.output(yellow,False)
+    GPIO.output(green,False)
+    if floor(val) == 3:
+        GPIO.output(green,True)
+    elif floor(val) == 2:
+        GPIO.output(yellow,True)
+    elif floor(val) == 1:
+        GPIO.output(red,True)
+"""
+#Testing, for maybe toggling led according to value read
+highest_voltage = 0
+blink_timer = time.time()*1000
+# Also must change all light_LED to include ID,val as args (or like 5,0 for the endings). Problem with this approach now is the every 1 second sending time  from the ESP32 side
+def light_LED(ID, val):
+    global highest_voltage
+    global blink_timer
+    # toggles RGB light of ID. Any value outside
+    # (eg. 5) will just turn all off
+    while True:
+        if val.value > highest_voltage:
+            highest_voltage = val.value
+        now = time.time()*1000
+        IDs = {1:red,2:yellow,3:green}
+        remaining_IDS = [1,2,3]
+        #print(f"\tID: {ID.value}\t remaining: {remaining_IDS}")
+        if ID.value in remaining_IDS:
+            print(f"\t id is in ids\tnow: {now}\tblink_timer: {blink_timer} (diff={now-blink_timer}")
+            remaining_IDS.remove(ID.value)
+            if ( (now - blink_timer) >= 100*(highest_voltage - val.value) ):
+                print(f"changing color {IDs[ID.value]} to {not GPIO.input(IDs[ID.value])}")
+                GPIO.output(IDs[ID.value], not GPIO.input(IDs[ID.value])) # toggle
+                blink_timer = now
+        for rID in remaining_IDS:
+            GPIO.output(IDs[rID],False)
 
 def check_button_press():
     # state 0: nothing. 1: receiving data. 2: error
@@ -63,35 +113,25 @@ def update_esps():
     #global esp_list
     while True:
         try:
-            command = "nmap -sn 192.168.1.0/24 | grep esp32 | grep -E '[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+' -o"
+            command = f"nmap -sn {cidr_block} | grep esp32 | grep -E '[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+' -o"
             res = (subprocess.check_output(command,shell=True)).decode().strip()
             ESP32s = res.split('\n')
             esp_list[:] = ESP32s
             time.sleep(1)
-            #print(ESP32s)
+            print(ESP32s)
         except Exception as e:
             print(f"failure in updating ESP list - {e}")
 
+LED_process = mp.Process(target=light_LED, args=(ID,val,))
 button_process = mp.Process(target=check_button_press)
 blink_process = mp.Process(target=blink_white, args=(STATE,))
 update_esp_process = mp.Process(target=update_esps,)
+
+LED_process.start()
 button_process.start()
 blink_process.start()
 update_esp_process.start()
 
-
-def light_LED(val):
-    # changes the RGB lights. Any value outside
-    # (eg. 5) will just turn all off
-    GPIO.output(red,False)
-    GPIO.output(yellow,False)
-    GPIO.output(green,False)
-    if floor(val) == 3:
-        GPIO.output(green,True)
-    elif floor(val) == 2:
-        GPIO.output(yellow,True)
-    elif floor(val) == 1:
-        GPIO.output(red,True)
 
 #ESP_ip = '192.168.1.108' # changes
 #ESP_ip = '192.168.43.199' # changes
@@ -120,22 +160,24 @@ while True:
         try:
             resp_message, addr = server_socket.recvfrom(1024)
             print(f"debug: resp_message = {resp_message.decode('utf-8')}")
-            ID, val = (resp_message.decode('utf-8')).split() # TODO: ID correspond to R,G,B. Do on ESP32 side also # TODO: ID correspond to R,G,B. Do on ESP32 side also
-            ID = int(ID)
-            val = float(val)
-            if val < 0: # -1 received back to indicate/confirm END
+            str_id, str_val = (resp_message.decode('utf-8')).split() # TODO: ID correspond to R,G,B. Do on ESP32 side also # TODO: ID correspond to R,G,B. Do on ESP32 side also
+            ID.value = int(str_id)
+            val.value = float(str_val)
+            if val.value < 0: # -1 received back to indicate/confirm END
                 print("END")
-                light_LED(5) #5 is outside range of 0-3, so it will turn off
-            else:
-                #print(f"sucessful receipt of message from {addr[0]}. message: {resp_message} (type:{type(resp_message)})")
-                light_LED(ID) # 1 lights red, 2 - yellow, 3 - greean, else off
+                #light_LED(5) #5 is outside range of 0-3, so it will turn off
+            #else:
+            #    #print(f"sucessful receipt of message from {addr[0]}. message: {resp_message} (type:{type(resp_message)})")
+            #    #light_LED(ID) # 1 lights red, 2 - yellow, 3 - greean, else off
 
         except Exception as e:
             STATE.value = 2
-            light_LED(5) # turn off RGB LEDs
+            ID.value = 5
+            #light_LED(5) # turn off RGB LEDs
             send_message('E') # send cancel to ESP32 because error
             print(f"FAILURE: {e}")
 
         if STATE.value == 0:
             send_message('E') # tell ESP32 to stop sending data
-            light_LED(5) # turn of RGB LEDs
+            ID.value = 5
+            #light_LED(5) # turn of RGB LEDs
