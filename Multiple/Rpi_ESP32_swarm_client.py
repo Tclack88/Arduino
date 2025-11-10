@@ -7,11 +7,10 @@ import subprocess
 import time
 
 ip_cmd = "hostname -I | awk '{print $1}'"
-myIP = (subprocess.check_output(ip_cmd,shell=True)).decode().strip()
-cidr_block = '.'.join(myIP.split('.')[:3])+'.0/24'
+myIP = (subprocess.check_output(ip_cmd,shell=True)).decode().strip() # used to find cidr_block
+cidr_block = '.'.join(myIP.split('.')[:3])+'.0/24' # subnet for NMAP (no more hardcoding IPs)
 print(f"my IP: {myIP}")
 print(f"cidr block: {cidr_block}")
-
 
 button = 16
 red = 5
@@ -36,25 +35,9 @@ manager = mp.Manager()
 esp_list = manager.list() # allow list to be accesible by parent and separate process
 ESP_port = 12005
 
-
-"""
-def light_LED(val):
-    # changes the RGB lights. Any value outside
-    # (eg. 5) will just turn all off
-    GPIO.output(red,False)
-    GPIO.output(yellow,False)
-    GPIO.output(green,False)
-    if floor(val) == 3:
-        GPIO.output(green,True)
-    elif floor(val) == 2:
-        GPIO.output(yellow,True)
-    elif floor(val) == 1:
-        GPIO.output(red,True)
-"""
-#Testing, for maybe toggling led according to value read
 highest_voltage = 0
 blink_timer = time.time()*1000
-# Also must change all light_LED to include ID,val as args (or like 5,0 for the endings). Problem with this approach now is the every 1 second sending time  from the ESP32 side
+
 def light_LED(ID, val):
     global highest_voltage
     global blink_timer
@@ -62,18 +45,17 @@ def light_LED(ID, val):
     # (eg. 5) will just turn all off
     while True:
         if val.value > highest_voltage:
-            highest_voltage = val.value
+            highest_voltage = val.value # keep track for blink rate
         now = time.time()*1000
         IDs = {1:red,2:yellow,3:green}
-        remaining_IDS = [1,2,3]
-        #print(f"\tID: {ID.value}\t remaining: {remaining_IDS}")
+        remaining_IDS = [1,2,3] 
         if ID.value in remaining_IDS:
-            print(f"\t id is in ids\tnow: {now}\tblink_timer: {blink_timer} (diff={now-blink_timer}")
+            # strategy: toggle then remove the ID of transmitting ESP
+            # then all others get turned off
             remaining_IDS.remove(ID.value)
-            if ( (now - blink_timer) >= 100*(highest_voltage - val.value) ):
-                print(f"changing color {IDs[ID.value]} to {not GPIO.input(IDs[ID.value])}")
+            if ( (now - blink_timer) >= 500*(highest_voltage - val.value) ): # *500 to approximate blink rate on ESP32
                 GPIO.output(IDs[ID.value], not GPIO.input(IDs[ID.value])) # toggle
-                blink_timer = now
+                blink_timer = now # reset blink timer
         for rID in remaining_IDS:
             GPIO.output(IDs[rID],False)
 
@@ -83,7 +65,6 @@ def check_button_press():
     while True:
         press = GPIO.input(button)
         if press:
-            #print("button pressed, toggling state")
             if STATE.value == 0:
                 STATE.value = 1
             elif STATE.value == 1:
@@ -96,8 +77,8 @@ def check_button_press():
 
 
 def blink_white(STATE):
-    # now misnomer. Controls the white pin. This definition is the
-    # process control. Blinks for errors. Solid if receiving from UDP
+    # Controls the white pin. This definition is the process control.
+    # Blinks for errors. Solid if transmitting/receiving. Off if idle
     while True:
         if STATE.value == 2:
             GPIO.output(white,True)
@@ -110,8 +91,7 @@ def blink_white(STATE):
             GPIO.output(white,False)
 
 def update_esps():
-    #global esp_list
-    while True:
+    while True: # System call to nmap to find/update all ESP32s in network
         try:
             command = f"nmap -sn {cidr_block} | grep esp32 | grep -E '[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+' -o"
             res = (subprocess.check_output(command,shell=True)).decode().strip()
@@ -132,10 +112,6 @@ button_process.start()
 blink_process.start()
 update_esp_process.start()
 
-
-#ESP_ip = '192.168.1.108' # changes
-#ESP_ip = '192.168.43.199' # changes
-
 server_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM) #UDP
 server_socket.settimeout(10.0)
 
@@ -144,14 +120,10 @@ def send_message(cmd):
     # ESP32 IP adresses followed by each ip address
     esps = ' '.join(sorted(esp_list))  # append cmd "C"/"E" and ESP list
     message = cmd + f" {len(esp_list)}  " + esps
-    #print("temp debug:", message)
-    #print(f"esps: {esp_list}")
     for ESP_ip in esp_list:
-        #print(f"sending message: {message} to esp {ESP_ip}")
         server_socket.sendto(message.encode('utf-8'), (ESP_ip, ESP_port) )
 
 while True:
-    #print(STATE)
     while STATE.value == 0 or STATE.value == 2:
         time.sleep(.1) # idle or error, stay here
     send_message('C') # 'C': continue/commence. leaving idle, send message to ESP32 to initiate UDP
@@ -159,25 +131,18 @@ while True:
         send_message('C') # 'C': continue/commence. leaving idle, send message to ESP32 to initiate UDP
         try:
             resp_message, addr = server_socket.recvfrom(1024)
-            print(f"debug: resp_message = {resp_message.decode('utf-8')}")
-            str_id, str_val = (resp_message.decode('utf-8')).split() # TODO: ID correspond to R,G,B. Do on ESP32 side also # TODO: ID correspond to R,G,B. Do on ESP32 side also
+            str_id, str_val = (resp_message.decode('utf-8')).split() 
             ID.value = int(str_id)
             val.value = float(str_val)
             if val.value < 0: # -1 received back to indicate/confirm END
                 print("END")
-                #light_LED(5) #5 is outside range of 0-3, so it will turn off
-            #else:
-            #    #print(f"sucessful receipt of message from {addr[0]}. message: {resp_message} (type:{type(resp_message)})")
-            #    #light_LED(ID) # 1 lights red, 2 - yellow, 3 - greean, else off
 
         except Exception as e:
             STATE.value = 2
             ID.value = 5
-            #light_LED(5) # turn off RGB LEDs
             send_message('E') # send cancel to ESP32 because error
             print(f"FAILURE: {e}")
 
         if STATE.value == 0:
             send_message('E') # tell ESP32 to stop sending data
             ID.value = 5
-            #light_LED(5) # turn of RGB LEDs
