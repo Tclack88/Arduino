@@ -39,10 +39,10 @@ STATE = mp.Value('i',0)
 press = mp.Value('b',GPIO.input(button))
 ID = mp.Value('i',0) # start red just to avoid '0' as non-existant value
 val = mp.Value('d',0.0)
-last_master = mp.Value('i',0) # keep track of last master (1,2 or 3) for logging
 
 manager = mp.Manager()
 esp_list = manager.list() # allow list to be accesible by parent and separate process
+resp_ips = manager.dict() # ip addresses from responses (for logging)
 data = manager.list() # hold all data collected since last button press
 ESP_port = 12005
 
@@ -53,18 +53,17 @@ blink_timer = time.time()*1000
 ## Plotting stuff starts #####################################################
 maxt = 30 # maximum show 30 samples
 
-#colormap =  {0:'#FFFFFFFF',1:'#F74B31',2:'#FAFC4C',3:'#27F549'}
 colormap =  {1:'#F74B31',2:'#FAFC4C',3:'#27F549'}
-#rygw = ['#FFFFFFFF','#F74B31','#FAFC4C','#27F549']
 ryg = ['#F74B31','#FAFC4C','#27F549']
 cmap = ListedColormap(ryg)
 norm = BoundaryNorm([0.5, 1.5, 2.5, 3.5], cmap.N)
 
 class Plotter(object):
-    def __init__(self, ax1, ax2, shared_STATE, shared_ID , shared_val, maxt=30):
+    def __init__(self, ax1, ax2, STATE, ID , val, maxt=30, dt=1):
         self.ax1 = ax1
         self.ax2 = ax2
         self.maxt = maxt
+        self.dt = dt
         self.time = 0
         self.tdata = np.array([])
         self.ydata = np.array([])
@@ -79,9 +78,9 @@ class Plotter(object):
         self.ax1.add_collection(self.line_collection)
         # ax2 point coloring:
         self.scatter = self.ax1.scatter(self.tdata,self.ydata,s=60,zorder=10) # higher zorder places this on TOP!
-        self.shared_STATE = shared_STATE
-        self.shared_ID = shared_ID
-        self.shared_val = shared_val
+        self.STATE = STATE
+        self.ID = ID
+        self.val = val
 
     def update(self, dat):
         if dat is None:
@@ -96,19 +95,20 @@ class Plotter(object):
         self.tdata = self.tdata[self.tdata > (t - self.maxt) ]
         self.ax1.set_xlim(self.tdata[0],self.tdata[0]+self.maxt) # scrolling
         self.line.set_data(self.tdata,self.ydata)
+        self.line.set_markerfacecolor('w') # blue default coloring for
+        self.line.set_markeredgecolor('w') # "empty" receives, change to white
         # step2: change the colors:
         #self.line.set_markerfacecolor(colormap[c]) # This doesn't work, it changes all colors every line
         #self.line.set_color(colormap[c]) # same issue as above, but includes the lines
         if len(self.tdata > 1):
             left_points = np.asarray(list(zip(self.tdata[:-1],self.ydata[:-1]))).reshape(-1,1,2)
-            #print(left_points)
             right_points = np.asarray(list(zip(self.tdata[1:],self.ydata[1:]))).reshape(-1,1,2)
+            #print(left_points)
             #print(right_points)
             #segments = np.vstack([left_points,right_points]).T.reshape(-1,1,2)
             #print(segments)
             #print()
             segments = np.concatenate([left_points,right_points],axis=1)
-            #print(segments)
             self.line_collection.set_segments(segments)
             self.line_collection.set_array(self.cdata[1:])
             self.line_collection.set_linewidth(2)
@@ -131,16 +131,18 @@ class Plotter(object):
 	
     def generator(self):
         while True:
-            if self.shared_STATE.value == 1:
-                #time.sleep(self.dt) # necessary?
+            if self.STATE.value == 1:
+                time.sleep(self.dt) # necessary?
+                #time.sleep(1)
                 self.time += 1
-                current_val = self.shared_val.value#*3.3/4095
-                current_ID = self.shared_ID.value
+                current_val = self.val.value#*3.3/4095
+                current_ID = self.ID.value
                 yield self.time, current_val, current_ID
 
             else:
                 time.sleep(.1) # neccessary?
                 yield None
+            #time.sleep(self.dt) # necessary?
 
 ## Plotting stuff ends #######################################################
 
@@ -152,7 +154,9 @@ def save_data():
     for esp, volt, duration in data:
        sums[esp] += duration 
     with open(f'./log/data_{timestamp}','w') as f:
-        f.write(f"red: {sums[1]} s\nyellow: {sums[2]} s\ngreen: {sums[3]} s\n\nraw: ")
+        f.write(f"\n\t\t (1) red ({resp_ips.get(1,'N/A')}):\t {sums[1]} s\n \
+                (2) yellow ({resp_ips.get(2,'N/A')}):\t  {sums[2]} s\n \
+                (3) green ({resp_ips.get(3,'N/A')}):\t  {sums[3]} s\n\nraw:\n")
         f.write(','.join([str(dat) for dat in data])+"\n")
 
 ##### multiprocess functions ######
@@ -189,9 +193,30 @@ def check_button_press():
                 STATE.value = 0
             elif STATE.value == 2:
                 STATE.value = 0
-            time.sleep(.3)
-        else:
-            time.sleep(.1)
+        time.sleep(.2)
+    else:
+        time.sleep(.1)
+
+"""
+# attempt to make more robust
+def check_button_press(channel):
+    # state 0: nothing. 1: receiving data. 2: error
+    global STATE
+    if STATE.value == 0:
+        STATE.value = 1
+    elif STATE.value == 1:
+        STATE.value = 0
+    elif STATE.value == 2:
+        STATE.value = 0
+
+GPIO.add_event_detect(button, GPIO.RISING, callback=check_button_press, bouncetime=100)
+
+try: 
+    GPIO.add_event_detect(button, GPIO.RISING, callback=check_button_press, bouncetime=100)
+    print("successful event_detect")
+except Exception as e:
+    print(f"another error: {e}")
+"""
 
 def blink_white(STATE):
     # Controls the white pin. This definition is the process control.
@@ -219,19 +244,18 @@ def update_esps():
         except Exception as e:
             print(f"failure in updating ESP list - {e}")
 
+server_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM) #UDP
+server_socket.settimeout(10.0)
+
+def send_message(cmd):
+    # send 'C' (continue/commence) or 'E' (end), followed by number of
+    # ESP32 IP adresses followed by each ip address
+    esps = ' '.join(sorted(esp_list))  # append cmd "C"/"E" and ESP list
+    message = cmd + f" {len(esp_list)}  " + esps
+    for ESP_ip in esp_list:
+        server_socket.sendto(message.encode('utf-8'), (ESP_ip, ESP_port) )
 
 def network_receiver(STATE, ID, val, esp_list):
-    server_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM) #UDP
-    server_socket.settimeout(10.0)
-
-    def send_message(cmd):
-        # send 'C' (continue/commence) or 'E' (end), followed by number of
-        # ESP32 IP adresses followed by each ip address
-        esps = ' '.join(sorted(esp_list))  # append cmd "C"/"E" and ESP list
-        message = cmd + f" {len(esp_list)}  " + esps
-        for ESP_ip in esp_list:
-            server_socket.sendto(message.encode('utf-8'), (ESP_ip, ESP_port) )
-
     while True:
         while STATE.value == 0 or STATE.value == 2:
             time.sleep(.1) # idle or error, stay here
@@ -245,13 +269,13 @@ def network_receiver(STATE, ID, val, esp_list):
                 str_id, str_val = (resp_message.decode('utf-8')).split() 
                 ID.value = int(str_id)
                 val.value = float(str_val)
+                resp_ips[ID.value] = addr[0]
                 if val.value < 0: # -1 received back to indicate/confirm END
                     print("END")
                     save_data()
                 else:
-                    if ID.value != last_master:
-                        data.append((ID.value,val.value,time.time() - starttime))
-                        last_master.value = ID.value
+                    data.append((ID.value,val.value,time.time() - starttime))
+                    starttime = time.time()
 
             except Exception as e:
                 STATE.value = 2
@@ -282,10 +306,10 @@ update_esp_process.start()
 network_receiver_process.start()
 
 
-#dt = 1 # probably unnecessary as it will just change from the generator
+dt = 1 # probably unnecessary as it will just change from the generator
 fig, (ax1, ax2) = plt.subplots(nrows=2,ncols=1)
 plt.style.use("bmh")
-plotter = Plotter(ax1, ax2, shared_STATE=STATE, shared_ID=ID, shared_val=val, maxt=maxt)
+plotter = Plotter(ax1, ax2, STATE=STATE, ID=ID, val=val, maxt=maxt, dt=dt)
 ani = animation.FuncAnimation(fig, plotter.update, plotter.generator, blit=False)
 
 ax1.set_xticks([])
