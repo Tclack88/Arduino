@@ -8,7 +8,7 @@
 #define WIFI_PW "wifi_password"
 */
 
-const char ID = 3;
+const char ID = 2;
 
 const int STORAGE_CAPACITY = 1; // set array size for collecting last N voltages
 const char* ssid = WIFI_SSID;
@@ -20,6 +20,7 @@ bool IS_MASTER = false;
 
 bool iLED_status = false;
 int sensor = 34; // pin to read photoresistor
+const int ext_led = 27; // external LED
 
 int sending = 0; // toggle 1 or 0. Keep track if sending to UDP or not
 int highest_voltage = 0; // global. Used to determine blink rate
@@ -44,12 +45,14 @@ float avg_photoresistor(){
   return sum / STORAGE_CAPACITY;
 }
 
-void collect(){ // update voltage reading
+void collect(){ // update voltage reading and light up external LED
   int val = analogRead(sensor);
   float voltage = 3.3-( (float)val /4095 )*3.3;
   if (voltage > highest_voltage)
     highest_voltage = voltage; // update global highest_voltage
   data[I] = voltage;
+  long int vv = 255 - 255*val/4095; // cast to 0-255 for analogWrite()
+  analogWrite(ext_led, vv); // light up external LED
   I = (I+1)%STORAGE_CAPACITY;
 }
 
@@ -132,6 +135,7 @@ char check_request(int packetSize){
 void setup() {
   pinMode(iLED,OUTPUT);
   // pinMode(sensor,INPUT); // apparently this is not needed
+  pinMode(ext_led, OUTPUT);
   Serial.begin(9600);
   // connect to network. Display IP
   WiFi.begin(ssid,pw);
