@@ -34,7 +34,6 @@ GPIO.setup(red,GPIO.OUT)
 GPIO.setup(yellow,GPIO.OUT)
 GPIO.setup(green,GPIO.OUT)
 
-
 STATE = mp.Value('i',0)
 press = mp.Value('b',GPIO.input(button))
 ID = mp.Value('i',0) # start red just to avoid '0' as non-existant value
@@ -76,7 +75,6 @@ class Plotter(object):
         # ax1 line coloring: 
         self.line_collection = LineCollection([], cmap=cmap, norm=norm)
         self.ax1.add_collection(self.line_collection)
-        # ax2 point coloring:
         self.scatter = self.ax1.scatter(self.tdata,self.ydata,s=60,zorder=10) # higher zorder places this on TOP!
         self.STATE = STATE
         self.ID = ID
@@ -103,11 +101,6 @@ class Plotter(object):
         if len(self.tdata > 1):
             left_points = np.asarray(list(zip(self.tdata[:-1],self.ydata[:-1]))).reshape(-1,1,2)
             right_points = np.asarray(list(zip(self.tdata[1:],self.ydata[1:]))).reshape(-1,1,2)
-            #print(left_points)
-            #print(right_points)
-            #segments = np.vstack([left_points,right_points]).T.reshape(-1,1,2)
-            #print(segments)
-            #print()
             segments = np.concatenate([left_points,right_points],axis=1)
             self.line_collection.set_segments(segments)
             self.line_collection.set_array(self.cdata[1:])
@@ -133,31 +126,36 @@ class Plotter(object):
         while True:
             if self.STATE.value == 1:
                 time.sleep(self.dt) # necessary?
-                #time.sleep(1)
                 self.time += 1
-                current_val = self.val.value#*3.3/4095
+                current_val = self.val.value
                 current_ID = self.ID.value
                 yield self.time, current_val, current_ID
 
             else:
                 time.sleep(.1) # neccessary?
                 yield None
-            #time.sleep(self.dt) # necessary?
 
 ## Plotting stuff ends #######################################################
 
 ### helper functions #####
 
 def save_data():
+    # save data and reset isp list if no longer sending
     timestamp = '_'.join(time.ctime().split(' '))
     sums = {1:0,2:0,3:0}
     for esp, volt, duration in data:
        sums[esp] += duration 
     with open(f'./log/data_{timestamp}','w') as f:
-        f.write(f"\n\t\t (1) red ({resp_ips.get(1,'N/A')}):\t {sums[1]} s\n \
-                (2) yellow ({resp_ips.get(2,'N/A')}):\t  {sums[2]} s\n \
-                (3) green ({resp_ips.get(3,'N/A')}):\t  {sums[3]} s\n\nraw:\n")
-        f.write(','.join([str(dat) for dat in data])+"\n")
+        if resp_ips.get(1,0):
+            f.write(f"\n\t\t (1) red ({resp_ips[1]}):\t {sums[1]} s\n")
+        if resp_ips.get(2,0):
+            f.write(f"\n\t\t (2) yellow ({resp_ips[2]}):\t {sums[2]} s\n")
+        if resp_ips.get(3,0):
+            f.write(f"\n\t\t (3) greeen ({resp_ips[3]}):\t {sums[3]} s\n")
+        f.write("\n\nraw:" + ','.join([str(dat) for dat in data])+"\n")
+    for k in resp_ips.keys(): # dynamically remove any ESP that left network
+        if k not in esp_list:
+            resp_ips.pop(k)
 
 ##### multiprocess functions ######
 def light_LED(ID, val):
@@ -196,27 +194,6 @@ def check_button_press():
         time.sleep(.2)
     else:
         time.sleep(.1)
-
-"""
-# attempt to make more robust
-def check_button_press(channel):
-    # state 0: nothing. 1: receiving data. 2: error
-    global STATE
-    if STATE.value == 0:
-        STATE.value = 1
-    elif STATE.value == 1:
-        STATE.value = 0
-    elif STATE.value == 2:
-        STATE.value = 0
-
-GPIO.add_event_detect(button, GPIO.RISING, callback=check_button_press, bouncetime=100)
-
-try: 
-    GPIO.add_event_detect(button, GPIO.RISING, callback=check_button_press, bouncetime=100)
-    print("successful event_detect")
-except Exception as e:
-    print(f"another error: {e}")
-"""
 
 def blink_white(STATE):
     # Controls the white pin. This definition is the process control.
@@ -301,8 +278,6 @@ LED_process.start()
 button_process.start()
 blink_process.start()
 update_esp_process.start()
-
-#network_receiver_process.daemon = True
 network_receiver_process.start()
 
 
