@@ -8,7 +8,7 @@
 #define WIFI_PW "wifi_password"
 */
 
-const char ID = 2;
+const char ID = 1;
 
 const int STORAGE_CAPACITY = 1; // set array size for collecting last N voltages
 const char* ssid = WIFI_SSID;
@@ -21,6 +21,8 @@ bool IS_MASTER = false;
 bool iLED_status = false;
 int sensor = 34; // pin to read photoresistor
 const int ext_led = 27; // external LED
+int bar[10] = {15, 2, 0, 4, 16, 17, 5,18,19,21}; // pins for the light bar
+int barsize = 10;
 
 int sending = 0; // toggle 1 or 0. Keep track if sending to UDP or not
 int highest_voltage = 0; // global. Used to determine blink rate
@@ -52,7 +54,12 @@ void collect(){ // update voltage reading and light up external LED
     highest_voltage = voltage; // update global highest_voltage
   data[I] = voltage;
   long int vv = 255 - 255*val/4095; // cast to 0-255 for analogWrite()
+  long int vvv = 10 - 10*val/4095; // cast to 0-10 for the bar LED
   analogWrite(ext_led, vv); // light up external LED
+  for (int i=0; i < vvv; i++) // light the bar
+    digitalWrite(bar[i],HIGH);
+  for (int i=vvv; i<barsize; i++) // unlight the rest (if on)
+    digitalWrite(bar[i],LOW);
   I = (I+1)%STORAGE_CAPACITY;
 }
 
@@ -136,6 +143,10 @@ void setup() {
   pinMode(iLED,OUTPUT);
   // pinMode(sensor,INPUT); // apparently this is not needed
   pinMode(ext_led, OUTPUT);
+  for(int i=0; i<barsize; i++){ // initialize LED bar pins
+    pinMode(bar[i], OUTPUT);
+    digitalWrite(bar[i],LOW);
+  }
   Serial.begin(9600);
   // connect to network. Display IP
   WiFi.begin(ssid,pw);
